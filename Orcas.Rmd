@@ -1,0 +1,497 @@
+---
+title: "Orca project"
+author: "Jessica Riker"
+date: "2026-11-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Questions: "Does the geographic distribution of recorded killer whale (Orcinus orca) occurrences remain consistent across multiple years during the same season?"
+- Null hypothesis (H₀): There is no significant difference in the geographic distribution of recorded orca occurrences between years during the same season.
+- Alternative hypothesis (H₁): The geographic distribution of recorded orca occurrences differs between years during the same season.
+
+
+```{r}
+# load in packages
+library(tidyverse)
+library(ggplot2)
+library(robis)
+library(lubridate)
+library(maps)
+```
+
+```{r}
+#1 Download orca occurrence data from OBIS
+#download all orca data
+orcas <- occurrence(scientificname = "Orcinus orca")
+
+#2 explore data
+## not included
+class(orcas)
+str(orcas)
+head(orcas)
+names(orcas)
+nrow(orcas)
+
+map_leaflet(orcas)
+
+```
+
+```{r}
+#3. Clean and validate date
+## not included - entire chunck
+# Examine the dataset dimensions
+dim(orcas)
+
+# Examine column names
+names(orcas)
+
+# Summary of variables
+summary(orcas)
+
+# Check date range
+range(as.Date(orcas$date), na.rm = TRUE)
+
+# Check available years
+table(lubridate::year(as.Date(orcas$date)), useNA = "ifany")
+
+# Check missing geographic coordinates
+sum(is.na(orcas$decimalLongitude))
+sum(is.na(orcas$decimalLatitude))
+
+# Check missing dates
+sum(is.na(orcas$date))
+```
+38,819 killer whale occurrence records and 176 variables from OBIS
+Earliest year of occurrence: 1758
+Latest year of occurrence: 2024
+
+```{r}
+# Examine date-related variables
+## not included - entire chunck
+
+head(orcas$eventDate, 10)
+
+head(orcas$date_start, 10)
+
+head(orcas$date_year, 10)
+
+head(orcas$year, 10)
+
+head(orcas$month, 10)
+
+# Examine the data types
+sapply(orcas[c(
+  "eventDate",
+  "date_start",
+  "date_year",
+  "year",
+  "month",
+  "day"
+)], class)
+```
+
+```{r}
+# clean and validate
+# Convert eventDate into a standard date format
+orcas_clean <- orcas %>%
+  mutate(
+    observation_date = as.Date(
+      substr(eventDate, 1, 10),
+      format = "%Y-%m-%d"
+    ),
+    year = year(observation_date),
+    month = month(observation_date)
+  )
+```
+
+```{r}
+# Examine converted dates
+## not included - entire chunck
+head(orcas_clean %>%
+       select(eventDate, observation_date, year, month))
+
+# Check missing dates
+sum(is.na(orcas_clean$observation_date))
+
+# Check date range
+range(orcas_clean$observation_date, na.rm = TRUE)
+
+# Count observations per year
+orcas_clean %>%
+  count(year, sort = TRUE)
+```
+
+```{r}
+# Count observations per year
+## not included - entire chunck
+yearly_counts <- orcas_clean %>%
+  filter(!is.na(year)) %>%
+  count(year)
+
+# Visualise annual occurrence records
+ggplot(yearly_counts, aes(x = year, y = n)) +
+  geom_col(fill = "steelblue") +
+  labs(
+    title = "Annual Killer Whale Occurrence Records",
+    subtitle = "OBIS occurrence dataset",
+    x = "Year",
+    y = "Number of records"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+```
+
+
+```{r}
+# Count observations by year and month (2015–2026)
+## not included - entire chunck
+year_month_counts <- orcas_clean %>%
+  filter(
+    !is.na(year),
+    !is.na(month),
+    year >= 2015,
+    year <= 2025
+  ) %>%
+  count(year, month)
+
+# Create a heatmap
+ggplot(year_month_counts,
+       aes(x = factor(month),
+           y = factor(year),
+           fill = n)) +
+  geom_tile() +
+  scale_fill_viridis_c(
+    name = "Observations"
+  ) +
+  labs(
+    title = "Seasonal Distribution of Killer Whale Records (2015–2025)",
+    x = "Month",
+    y = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+```
+
+```{r}
+# Visualise global occurrence records
+## not included - entire chunck
+ggplot(orcas_clean,
+       aes(x = decimalLongitude,
+           y = decimalLatitude)) +
+  geom_point(alpha = 0.2, size = 0.5) +
+  coord_quickmap() +
+  labs(
+    title = "Global Distribution of Killer Whale Occurrences",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal()
+```
+
+1. Define the spatial research question
+Research question: Does the global spatial distribution of recorded killer whale occurrences during summer remain consistent between 2015 and 2026?
+
+Hypotheses
+- H₀: The geographic distribution of recorded killer whale occurrences during summer does not differ substantially between years.
+- H₁: The geographic distribution of recorded killer whale occurrences during summer changes between years.
+One important decision: because summer occurs at different times in each hemisphere, define it as:
+- Northern Hemisphere summer: June, July, August.
+- Southern Hemisphere summer: December, January, February.
+
+```{r}
+# standardize summer: Southern Hemisphere summer crosses two calendar years. For example, December 2015–February 2016 is the 2015/16 summer. We will label it 2015, so it can be compared with Northern Hemisphere summer 2015.
+
+
+orcas_summer <- orcas_clean %>%
+  filter(
+    !is.na(observation_date),
+    !is.na(decimalLatitude),
+    !is.na(decimalLongitude),
+    between(year, 2015, 2026)
+  ) %>%
+  mutate(
+    hemisphere = if_else(
+      decimalLatitude >= 0,
+      "Northern",
+      "Southern"
+    ),
+
+    summer_year = case_when(
+      hemisphere == "Northern" ~ year,
+      hemisphere == "Southern" & month == 12 ~ year,
+      hemisphere == "Southern" & month %in% c(1, 2) ~ year - 1,
+      TRUE ~ NA_integer_
+    )
+  ) %>%
+  filter(
+    (hemisphere == "Northern" & month %in% 6:8) |
+    (hemisphere == "Southern" & month %in% c(12, 1, 2)),
+    !is.na(summer_year),
+    between(summer_year, 2015, 2025)
+  )
+
+# Built following Workshop 4 custom function standards to summarize annual metrics
+summarise_orca_summer <- function(data_df, target_hemisphere) {
+  # Safety check: ensure valid hemisphere argument is passed using stop()[cite: 90]
+  if (!target_hemisphere %in% c("Northern", "Southern")) {
+    stop("Error: target_hemisphere must be either 'Northern' or 'Southern'.")
+  }
+  
+  data_df %>%
+    filter(hemisphere == target_hemisphere) %>%
+    group_by(summer_year) %>%
+    summarise(
+      record_count = n(),
+      mean_latitude = mean(decimalLatitude, na.rm = TRUE),
+      mean_longitude = mean(decimalLongitude, na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
+# Test the custom function for both hemispheres
+northern_summary <- summarise_orca_summer(orcas_summer, "Northern")
+southern_summary <- summarise_orca_summer(orcas_summer, "Southern")
+
+print("Northern Hemisphere Summer Summary:")
+print(head(northern_summary))
+
+
+
+
+#check summer records
+#orcas_summer %>%
+ # count(summer_year, hemisphere)
+
+# nrow(orcas_summer)
+```
+summer filter has retained 13,036 occurrence records across 2015–2026
+- Northern Hemisphere records are consistently higher than Southern Hemisphere records.
+- Records increase substantially in 2024 and 2025.
+- Southern Hemisphere records are particularly low in 2020, with only 19 records.
+
+```{r}
+# 3. Next step: create annual spatial maps
+#create world map
+world_map <- map_data("world")
+
+#Northern hemi summer records plot
+ggplot() +
+  geom_polygon(
+    data = world_map,
+    aes(x = long, y = lat, group = group),
+    fill = "grey95",
+    colour = "grey80",
+    linewidth = 0.1
+  ) +
+  geom_point(
+    data = filter(orcas_summer, hemisphere == "Northern", between(summer_year, 2015, 2025)),
+    aes(
+      x = decimalLongitude,
+      y = decimalLatitude
+    ),
+      colour = "steelblue",
+    alpha = 0.5,
+    size = 0.6
+  ) +
+  facet_wrap(~ summer_year, ncol = 3) +
+  coord_quickmap() +
+  labs(
+    title = "Northern Hemisphere Summer Orca Occurrences",
+    subtitle = "Faceted small multiples (June–August, 2015–2025)",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold", size = 11)
+  )
+
+
+
+#southern hemi summer records plot
+ggplot() +
+  geom_polygon(
+    data = world_map,
+    aes(x = long, y = lat, group = group),
+    fill = "grey90",
+    colour = "grey70",
+    linewidth = 0.2
+  ) +
+  geom_point(
+    data = filter(
+      orcas_summer,
+      hemisphere == "Northern",
+      summer_year <= 2025
+    ),
+    aes(
+      x = decimalLongitude,
+      y = decimalLatitude,
+      colour = factor(summer_year)
+    ),
+    alpha = 0.5,
+    size = 0.8
+  ) +
+  coord_quickmap() +
+  labs(
+    title = "Northern Hemisphere Summer Killer Whale Occurrences",
+    subtitle = "June–August, 2015–2025",
+    x = "Longitude",
+    y = "Latitude",
+    colour = "Summer year"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r}
+#southern hemi plots
+#southern hemi summer records plot all years on one map
+ggplot() +
+  geom_polygon(
+    data = world_map,
+    aes(x = long, y = lat, group = group),
+    fill = "grey90",
+    colour = "grey70",
+    linewidth = 0.2
+  ) +
+  geom_point(
+    data = filter(
+      orcas_summer,
+      hemisphere == "Southern",
+      summer_year <= 2025
+    ),
+    aes(
+      x = decimalLongitude,
+      y = decimalLatitude,
+      colour = factor(summer_year)
+    ),
+    alpha = 0.5,
+    size = 0.8
+  ) +
+  coord_quickmap() +
+  labs(
+    title = "Southern Hemisphere Summer Killer Whale Occurrences",
+    subtitle = "December–February, 2015–2025",
+    x = "Longitude",
+    y = "Latitude",
+    colour = "Summer year"
+  ) +
+  theme_minimal()
+
+#plot broken up by year
+#southern hemi summer records plot
+ggplot() +
+  geom_polygon(
+    data = world_map,
+    aes(x = long, y = lat, group = group),
+    fill = "grey95",
+    colour = "grey80",
+    linewidth = 0.1
+  ) +
+  geom_point(
+    data = filter(orcas_summer, hemisphere == "Southern", between(summer_year, 2015, 2025)),
+    aes(
+      x = decimalLongitude,
+      y = decimalLatitude
+    ),
+      colour = "steelblue",
+    alpha = 0.5,
+    size = 0.6
+  ) +
+  facet_wrap(~ summer_year, ncol = 3) +
+  coord_quickmap() +
+  labs(
+    title = "Southern Hemisphere Summer Orca Occurrences",
+    subtitle = "Faceted small multiples (December–February, 2015–2025)",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold", size = 11)
+  )
+
+```
+
+```{r}
+# combine maps
+# Combined Map 1: Both hemispheres, all years (2015–2025) on a single map
+ggplot() +
+  geom_polygon(
+    data = world_map,
+    aes(x = long, y = lat, group = group),
+    fill = "grey90",
+    colour = "grey70",
+    linewidth = 0.2
+  ) +
+  geom_point(
+    data = filter(orcas_summer, between(summer_year, 2015, 2025)),
+    aes(
+      x = decimalLongitude,
+      y = decimalLatitude,
+      colour = factor(summer_year)
+    ),
+    alpha = 0.5,
+    size = 0.7
+  ) +
+  coord_quickmap() +
+  labs(
+    title = "Global Summer Killer Whale Occurrences (Both Hemispheres)",
+    subtitle = "Combined records across Northern (Jun–Aug) and Southern (Dec–Feb) summers, 2015–2025",
+    x = "Longitude",
+    y = "Latitude",
+    colour = "Summer year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14)
+  )
+
+# Combined Map 2: Faceted small multiples showing both hemispheres per year
+ggplot() +
+  geom_polygon(
+    data = world_map,
+    aes(x = long, y = lat, group = group),
+    fill = "grey95",
+    colour = "grey80",
+    linewidth = 0.1
+  ) +
+  geom_point(
+    data = filter(orcas_summer, between(summer_year, 2015, 2025)),
+    aes(
+      x = decimalLongitude,
+      y = decimalLatitude,
+      colour = hemisphere
+    ),
+    alpha = 0.6,
+    size = 0.7
+  ) +
+  facet_wrap(~ summer_year, ncol = 3) +
+  scale_color_manual(values = c("Northern" = "skyblue", "Southern" = "lightblue")) +
+  coord_quickmap() +
+  labs(
+    title = "Global Summer Orca Occurrences by Year",
+    subtitle = "Faceted small multiples (Both hemispheres, 2015–2025)",
+    x = "Longitude",
+    y = "Latitude",
+    colour = "Hemisphere"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold", size = 11),
+    legend.position = "bottom"
+  )
+```
+
